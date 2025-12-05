@@ -288,7 +288,101 @@ const SignatureContent = ({ data, logoSrc, isForCopy }) => {
         }
     };
 
-    // Fixed height container matching headshot size
+    // EMAIL VERSION: Use tables for Gmail compatibility
+    if (isForCopy) {
+        return (
+            <table cellPadding="0" cellSpacing="0" border="0" style={{ borderCollapse: 'collapse', fontFamily: 'Arial, sans-serif' }}>
+                <tbody>
+                    <tr>
+                        {/* Headshot */}
+                        {data.showHeadshot && data.headshotUrl && (
+                            <td style={{ paddingRight: '10px', verticalAlign: 'top' }}>
+                                <img
+                                    src={data.headshotUrl}
+                                    alt={data.fullName}
+                                    width={data.headshotContainerSize}
+                                    height={data.headshotContainerSize}
+                                    style={{
+                                        width: `${data.headshotContainerSize}px`,
+                                        height: `${data.headshotContainerSize}px`,
+                                        display: 'block',
+                                        border: '0',
+                                        ...getShapeStyles(data.headshotShape)
+                                    }}
+                                />
+                            </td>
+                        )}
+
+                        {/* Logo */}
+                        {logoSrc && (
+                            <td style={{ verticalAlign: 'top', paddingRight: '0' }}>
+                                <img
+                                    src={`https://res.cloudinary.com/dippj70ao/image/upload/a_270,h_${data.headshotContainerSize},c_scale/v1763925891/skyhi-og-image-black_iychjj.png`}
+                                    alt="SkyHi AI"
+                                    height={data.headshotContainerSize}
+                                    style={{
+                                        height: `${data.headshotContainerSize}px`,
+                                        width: 'auto',
+                                        display: 'block',
+                                        border: '0'
+                                    }}
+                                />
+                            </td>
+                        )}
+
+                        {/* Blue Divider */}
+                        <td style={{ width: '3px', backgroundColor: '#3B82F6', verticalAlign: 'top' }}>
+                            <div style={{ width: '3px', height: `${data.headshotContainerSize}px`, backgroundColor: '#3B82F6' }}></div>
+                        </td>
+
+                        {/* Info */}
+                        <td style={{ verticalAlign: 'top', paddingLeft: '10px' }}>
+                            <table cellPadding="0" cellSpacing="0" border="0">
+                                <tbody>
+                                    <tr>
+                                        <td style={{ paddingBottom: '8px' }}>
+                                            <strong style={{ fontSize: '18px', color: '#000000', display: 'block', fontWeight: '900' }}>{data.fullName}</strong>
+                                            <span style={{ fontSize: '14px', color: '#3B82F6', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{data.title}</span>
+                                        </td>
+                                    </tr>
+                                    {data.phone && (
+                                        <tr>
+                                            <td style={{ fontSize: '13px', color: '#64748b', paddingBottom: '2px' }}>
+                                                <span style={{ color: '#3B82F6', fontWeight: 'bold' }}>P:</span> <a href={`tel:${data.phone}`} style={{ color: '#333333', textDecoration: 'none' }}>{data.phone}</a>
+                                            </td>
+                                        </tr>
+                                    )}
+                                    {data.email && (
+                                        <tr>
+                                            <td style={{ fontSize: '13px', color: '#64748b', paddingBottom: '2px' }}>
+                                                <span style={{ color: '#3B82F6', fontWeight: 'bold' }}>E:</span> <a href={`mailto:${data.email}`} style={{ color: '#333333', textDecoration: 'none' }}>{data.email}</a>
+                                            </td>
+                                        </tr>
+                                    )}
+                                    {data.website && (
+                                        <tr>
+                                            <td style={{ fontSize: '13px', color: '#64748b', paddingBottom: '2px' }}>
+                                                <span style={{ color: '#3B82F6', fontWeight: 'bold' }}>W:</span> <a href={`https://${data.website}`} style={{ color: '#333333', textDecoration: 'none' }}>{data.website}</a>
+                                            </td>
+                                        </tr>
+                                    )}
+                                    {data.address && (
+                                        <tr>
+                                            <td style={{ fontSize: '13px', color: '#64748b' }}>
+                                                <span style={{ color: '#3B82F6', fontWeight: 'bold' }}>A:</span> {data.address}
+                                            </td>
+                                        </tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        );
+    }
+
+    // PREVIEW VERSION: Use flexbox for browser display
     return (
         <div style={{ 
             display: 'flex', 
@@ -299,46 +393,28 @@ const SignatureContent = ({ data, logoSrc, isForCopy }) => {
             {/* Headshot */}
             {data.showHeadshot && data.headshotUrl && (
                 <div style={{ paddingRight: '10px', display: 'flex', alignItems: 'center' }}>
-                    {isForCopy ? (
-                        // For email copy: use direct URL (will be replaced with Cloudinary URL on copy)
-                        // The image is already cropped client-side before upload
+                    <div style={{
+                        width: `${data.headshotContainerSize}px`,
+                        height: `${data.headshotContainerSize}px`,
+                        overflow: 'hidden',
+                        position: 'relative',
+                        flexShrink: 0,
+                        ...getShapeStyles(data.headshotShape)
+                    }}>
                         <img
                             src={data.headshotUrl}
                             alt={data.fullName}
-                            width={data.headshotContainerSize}
-                            height={data.headshotContainerSize}
                             style={{
-                                width: `${data.headshotContainerSize}px`,
-                                height: `${data.headshotContainerSize}px`,
-                                display: 'block',
-                                border: '0',
-                                ...getShapeStyles(data.headshotShape)
+                                width: `${data.headshotImageScale}%`,
+                                height: 'auto',
+                                maxWidth: 'none',
+                                position: 'relative',
+                                left: `${(data.headshotX - 50) * 5}px`,
+                                top: `${(data.headshotY - 50) * 5}px`,
+                                display: 'block'
                             }}
                         />
-                    ) : (
-                        <div style={{
-                            width: `${data.headshotContainerSize}px`,
-                            height: `${data.headshotContainerSize}px`,
-                            overflow: 'hidden',
-                            position: 'relative',
-                            flexShrink: 0,
-                            ...getShapeStyles(data.headshotShape)
-                        }}>
-                            <img
-                                src={data.headshotUrl}
-                                alt={data.fullName}
-                                style={{
-                                    width: `${data.headshotImageScale}%`,
-                                    height: 'auto',
-                                    maxWidth: 'none',
-                                    position: 'relative',
-                                    left: `${(data.headshotX - 50) * 5}px`,
-                                    top: `${(data.headshotY - 50) * 5}px`,
-                                    display: 'block'
-                                }}
-                            />
-                        </div>
-                    )}
+                    </div>
                 </div>
             )}
 
