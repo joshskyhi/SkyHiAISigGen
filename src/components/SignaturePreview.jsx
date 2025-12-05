@@ -1,7 +1,10 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
+import { uploadBlob } from '../utils/upload';
 
 const SignaturePreview = ({ data }) => {
     const signatureRef = useRef(null);
+    const [isUploading, setIsUploading] = useState(false);
+    const [uploadedHeadshotUrl, setUploadedHeadshotUrl] = useState(null);
 
     const getLogoSrc = () => {
         if (data.logo === 'show') return 'https://res.cloudinary.com/dippj70ao/image/upload/v1763925891/skyhi-og-image-black_iychjj.png';
@@ -12,35 +15,133 @@ const SignaturePreview = ({ data }) => {
 
     const hiddenCopyRef = useRef(null);
 
-    const copyToClipboard = () => {
+    // Check if URL is a local data URL (not yet uploaded to Cloudinary)
+    const isLocalDataUrl = (url) => {
+        return url && url.startsWith('data:');
+    };
+
+    // Crop the local image using canvas based on current scale/position settings
+    // This must match exactly how the CSS preview renders the image
+    const cropImageToBlob = async (dataUrl) => {
+        return new Promise((resolve, reject) => {
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                const size = data.headshotContainerSize;
+                
+                canvas.width = size;
+                canvas.height = size;
+                
+                // CSS preview sets: width: ${headshotImageScale}% of container
+                // So scaled width = container size * (scale / 100)
+                const scaledWidth = size * (data.headshotImageScale / 100);
+                
+                // Maintain aspect ratio (height: auto in CSS)
+                const aspectRatio = img.height / img.width;
+                const scaledHeight = scaledWidth * aspectRatio;
+                
+                // CSS preview offset: left/top = (headshotX/Y - 50) * 5 px
+                const xOffset = (data.headshotX - 50) * 5;
+                const yOffset = (data.headshotY - 50) * 5;
+                
+                // Position: start at top-left (0,0) and apply offset
+                // The CSS uses position: relative with left/top offsets
+                const x = xOffset;
+                const y = yOffset;
+                
+                // Draw the image
+                ctx.drawImage(img, x, y, scaledWidth, scaledHeight);
+                
+                // Convert to blob
+                canvas.toBlob((blob) => {
+                    if (blob) {
+                        resolve(blob);
+                    } else {
+                        reject(new Error('Failed to create blob from canvas'));
+                    }
+                }, 'image/jpeg', 0.9);
+            };
+            img.onerror = () => reject(new Error('Failed to load image'));
+            img.src = dataUrl;
+        });
+    };
+
+    const copyToClipboard = async () => {
         if (!hiddenCopyRef.current) return;
 
-        // We need to copy the HTML content from the hidden, email-optimized version
-        const html = hiddenCopyRef.current.innerHTML;
+        try {
+            let headshotUrlForEmail = data.headshotUrl;
+            
+            // If headshot is a local data URL, crop and upload it first
+            if (data.showHeadshot && data.headshotUrl && isLocalDataUrl(data.headshotUrl)) {
+                setIsUploading(true);
+                
+                try {
+                    // Crop the image using canvas
+                    const croppedBlob = await cropImageToBlob(data.headshotUrl);
+                    
+                    // Upload to Cloudinary
+                    headshotUrlForEmail = await uploadBlob(croppedBlob, 'headshot.jpg');
+                    setUploadedHeadshotUrl(headshotUrlForEmail);
+                    console.log('Uploaded cropped headshot to:', headshotUrlForEmail);
+                } catch (uploadError) {
+                    console.error('Failed to upload headshot:', uploadError);
+                    alert('Failed to upload headshot image. The signature will be copied without the headshot image working for recipients.');
+                }
+                
+                setIsUploading(false);
+            } else if (uploadedHeadshotUrl) {
+                // Use previously uploaded URL if available
+                headshotUrlForEmail = uploadedHeadshotUrl;
+            }
 
-        // Use the Clipboard API to write HTML
-        const blob = new Blob([html], { type: 'text/html' });
-        const textBlob = new Blob([hiddenCopyRef.current.innerText], { type: 'text/plain' });
+            // Build the signature HTML with the uploaded URL
+            // We need to re-render the hidden copy with the correct URL
+            const tempContainer = document.createElement('div');
+            tempContainer.innerHTML = hiddenCopyRef.current.innerHTML;
+            
+            // Replace the data URL with the Cloudinary URL in the HTML
+            if (headshotUrlForEmail && !isLocalDataUrl(headshotUrlForEmail)) {
+                const imgElements = tempContainer.querySelectorAll('img');
+                imgElements.forEach(img => {
+                    if (img.alt === data.fullName && isLocalDataUrl(img.src)) {
+                        img.src = headshotUrlForEmail;
+                    }
+                });
+            }
 
-        const item = new ClipboardItem({
-            'text/html': blob,
-            'text/plain': textBlob
-        });
+            const html = tempContainer.innerHTML;
 
-        navigator.clipboard.write([item]).then(() => {
+            // Use the Clipboard API to write HTML
+            const blob = new Blob([html], { type: 'text/html' });
+            const textBlob = new Blob([tempContainer.innerText], { type: 'text/plain' });
+
+            const item = new ClipboardItem({
+                'text/html': blob,
+                'text/plain': textBlob
+            });
+
+            await navigator.clipboard.write([item]);
             alert('Signature copied to clipboard! Paste it into Gmail settings.');
-        }).catch(err => {
+        } catch (err) {
             console.error('Failed to copy: ', err);
             alert('Failed to copy. Please try selecting and copying manually.');
-        });
+            setIsUploading(false);
+        }
     };
 
     return (
         <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
                 <h2>Preview</h2>
-                <button className="btn btn-primary" onClick={copyToClipboard}>
-                    Copy Signature
+                <button 
+                    className="btn btn-primary" 
+                    onClick={copyToClipboard}
+                    disabled={isUploading}
+                >
+                    {isUploading ? 'Uploading image...' : 'Copy Signature'}
                 </button>
             </div>
 
@@ -63,8 +164,8 @@ const SignaturePreview = ({ data }) => {
                 </div>
             </div>
             <p style={{ marginTop: '1rem', fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
-                Note: Logos are loaded from Cloudinary and will work properly in all email clients.
-                Headshots are automatically uploaded to Cloudinary when you select an image.
+                Note: Headshots are cropped and uploaded when you copy the signature.
+                The image in your signature will be hosted on Cloudinary for email compatibility.
             </p>
         </div>
     );
@@ -75,31 +176,6 @@ const SignatureContent = ({ data, logoSrc, isForCopy }) => {
     const titlePaddingBottom = isForCopy ? '18px' : '10px';
     const nameMarginBottom = isForCopy ? '2px' : '0px';
     const rowPaddingBottom = isForCopy ? '5px' : '2px';
-
-    // Gmail cannot clip images - use Cloudinary to pre-crop server-side
-    const getEmailCroppedUrl = (url) => {
-        if (!url || !url.includes('cloudinary.com')) return url;
-        
-        const size = data.headshotContainerSize;
-        const scale = data.headshotImageScale / 100;
-        
-        // Calculate the crop window size (inverse of scale)
-        const cropSize = Math.round(size / scale);
-        
-        // Calculate offset based on X/Y position (0-100 where 50 is center)
-        // The offset should move the crop window, not the image
-        const maxOffset = Math.max(0, cropSize - size);
-        const xOffset = Math.round((data.headshotX / 100) * maxOffset);
-        const yOffset = Math.round((data.headshotY / 100) * maxOffset);
-        
-        // Build Cloudinary transformation URL
-        const urlParts = url.split('/upload/');
-        if (urlParts.length === 2) {
-            // c_crop extracts a region, then c_fill resizes to exact dimensions
-            return `${urlParts[0]}/upload/c_fill,w_${size},h_${size},g_xy_center,x_${xOffset},y_${yOffset},z_${scale}/${urlParts[1]}`;
-        }
-        return url;
-    };
 
     const getShapeStyles = (shape) => {
         switch (shape) {
@@ -212,123 +288,116 @@ const SignatureContent = ({ data, logoSrc, isForCopy }) => {
         }
     };
 
+    // Fixed height container matching headshot size
     return (
-        <table cellPadding="0" cellSpacing="0" border="0" style={{ borderCollapse: 'collapse' }}>
-            <tbody>
-                <tr>
-                    {/* Headshot Column */}
-                    {data.showHeadshot && data.headshotUrl && (
-                        <td style={{ paddingRight: '10px', verticalAlign: 'top' }}>
-                            {isForCopy ? (
-                                // EMAIL VERSION: Simple img with Cloudinary pre-cropped image
-                                // Gmail ignores overflow:hidden, so we MUST pre-crop server-side
-                                <img
-                                    src={getEmailCroppedUrl(data.headshotUrl)}
-                                    alt={data.fullName}
-                                    width={data.headshotContainerSize}
-                                    height={data.headshotContainerSize}
-                                    style={{
-                                        width: `${data.headshotContainerSize}px`,
-                                        height: `${data.headshotContainerSize}px`,
-                                        display: 'block',
-                                        border: '0',
-                                        ...getShapeStyles(data.headshotShape)
-                                    }}
-                                />
-                            ) : (
-                                // PREVIEW VERSION: CSS-based positioning (works in browsers)
-                                <div style={{
-                                    width: `${data.headshotContainerSize}px`,
-                                    height: `${data.headshotContainerSize}px`,
-                                    overflow: 'hidden',
-                                    position: 'relative',
-                                    display: 'inline-block',
-                                    ...getShapeStyles(data.headshotShape)
-                                }}>
-                                    <img
-                                        src={data.headshotUrl}
-                                        alt={data.fullName}
-                                        style={{
-                                            width: `${data.headshotImageScale}%`,
-                                            height: 'auto',
-                                            maxWidth: 'none',
-                                            position: 'relative',
-                                            left: `${(data.headshotX - 50) * 5}px`,
-                                            top: `${(data.headshotY - 50) * 5}px`,
-                                            display: 'block'
-                                        }}
-                                    />
-                                </div>
-                            )}
-                        </td>
-                    )}
-
-                    {/* Logo Column (Vertical) */}
-                    {logoSrc && (
-                        <td style={{ padding: '0', verticalAlign: 'top' }}>
+        <div style={{ 
+            display: 'flex', 
+            alignItems: 'stretch',
+            height: `${data.headshotContainerSize}px`,
+            fontFamily: 'Arial, sans-serif' 
+        }}>
+            {/* Headshot */}
+            {data.showHeadshot && data.headshotUrl && (
+                <div style={{ paddingRight: '10px', display: 'flex', alignItems: 'center' }}>
+                    {isForCopy ? (
+                        // For email copy: use direct URL (will be replaced with Cloudinary URL on copy)
+                        // The image is already cropped client-side before upload
+                        <img
+                            src={data.headshotUrl}
+                            alt={data.fullName}
+                            width={data.headshotContainerSize}
+                            height={data.headshotContainerSize}
+                            style={{
+                                width: `${data.headshotContainerSize}px`,
+                                height: `${data.headshotContainerSize}px`,
+                                display: 'block',
+                                border: '0',
+                                ...getShapeStyles(data.headshotShape)
+                            }}
+                        />
+                    ) : (
+                        <div style={{
+                            width: `${data.headshotContainerSize}px`,
+                            height: `${data.headshotContainerSize}px`,
+                            overflow: 'hidden',
+                            position: 'relative',
+                            flexShrink: 0,
+                            ...getShapeStyles(data.headshotShape)
+                        }}>
                             <img
-                                src={`https://res.cloudinary.com/dippj70ao/image/upload/a_270,h_${data.headshotContainerSize},c_fit/v1763925891/skyhi-og-image-black_iychjj.png`}
-                                alt="SkyHi AI"
-                                height={data.headshotContainerSize}
+                                src={data.headshotUrl}
+                                alt={data.fullName}
                                 style={{
-                                    height: `${data.headshotContainerSize}px`,
-                                    width: 'auto',
-                                    display: 'block',
-                                    border: '0'
+                                    width: `${data.headshotImageScale}%`,
+                                    height: 'auto',
+                                    maxWidth: 'none',
+                                    position: 'relative',
+                                    left: `${(data.headshotX - 50) * 5}px`,
+                                    top: `${(data.headshotY - 50) * 5}px`,
+                                    display: 'block'
                                 }}
                             />
-                        </td>
+                        </div>
                     )}
+                </div>
+            )}
 
-                    {/* Border Column - solid color for Gmail compatibility */}
-                    <td style={{ width: '3px', padding: '0', backgroundColor: '#3B82F6' }}>
-                        <div style={{ width: '3px', height: `${data.headshotContainerSize}px`, backgroundColor: '#3B82F6' }}></div>
-                    </td>
+            {/* Logo */}
+            {logoSrc && (
+                <div style={{ display: 'flex', alignItems: 'center' }}>
+                    <img
+                        src={`https://res.cloudinary.com/dippj70ao/image/upload/a_270,h_${data.headshotContainerSize},c_scale/v1763925891/skyhi-og-image-black_iychjj.png`}
+                        alt="SkyHi AI"
+                        height={data.headshotContainerSize}
+                        style={{
+                            height: `${data.headshotContainerSize}px`,
+                            width: 'auto',
+                            display: 'block',
+                            border: '0'
+                        }}
+                    />
+                </div>
+            )}
 
-                    {/* Info Column */}
-                    <td style={{ verticalAlign: 'top', paddingLeft: '10px' }}>
-                        <table cellPadding="0" cellSpacing="0" border="0">
-                            <tbody>
-                                <tr>
-                                    <td style={{ paddingBottom: titlePaddingBottom }}>
-                                        <strong style={{ fontSize: '18px', color: '#000000', display: 'block', fontWeight: '900', marginBottom: nameMarginBottom }}>{data.fullName}</strong>
-                                        <span style={{ fontSize: '14px', color: '#3B82F6', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{data.title}</span>
-                                    </td>
-                                </tr>
-                                {data.phone && (
-                                    <tr>
-                                        <td style={{ fontSize: '13px', color: '#64748b', paddingBottom: rowPaddingBottom }}>
-                                            <span style={{ color: '#3B82F6', fontWeight: 'bold' }}>P:</span> <a href={`tel:${data.phone}`} style={{ color: '#333333', textDecoration: 'none' }}>{data.phone}</a>
-                                        </td>
-                                    </tr>
-                                )}
-                                {data.email && (
-                                    <tr>
-                                        <td style={{ fontSize: '13px', color: '#64748b', paddingBottom: rowPaddingBottom }}>
-                                            <span style={{ color: '#3B82F6', fontWeight: 'bold' }}>E:</span> <a href={`mailto:${data.email}`} style={{ color: '#333333', textDecoration: 'none' }}>{data.email}</a>
-                                        </td>
-                                    </tr>
-                                )}
-                                {data.website && (
-                                    <tr>
-                                        <td style={{ fontSize: '13px', color: '#64748b', paddingBottom: rowPaddingBottom }}>
-                                            <span style={{ color: '#3B82F6', fontWeight: 'bold' }}>W:</span> <a href={`https://${data.website}`} style={{ color: '#333333', textDecoration: 'none' }}>{data.website}</a>
-                                        </td>
-                                    </tr>
-                                )}
-                                {data.address && (
-                                    <tr>
-                                        <td style={{ fontSize: '13px', color: '#64748b' }}>
-                                            <span style={{ color: '#3B82F6', fontWeight: 'bold' }}>A:</span> {data.address}
-                                        </td>
-                                    </tr>
-                                )}
-                            </tbody>
-                        </table>
-                    </td>
-                </tr>
-            </tbody>
-        </table >
+            {/* Blue Divider - full height of container */}
+            <div style={{ width: '3px', backgroundColor: '#3B82F6' }}></div>
+
+            {/* Info - spread evenly within fixed height */}
+            <div style={{ 
+                paddingLeft: '10px', 
+                display: 'flex', 
+                flexDirection: 'column', 
+                justifyContent: 'space-between',
+                height: '100%'
+            }}>
+                <div>
+                    <strong style={{ fontSize: '18px', color: '#000000', display: 'block', fontWeight: '900', lineHeight: '1.2' }}>{data.fullName}</strong>
+                    <span style={{ fontSize: '14px', color: '#3B82F6', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{data.title}</span>
+                </div>
+                <div>
+                    {data.phone && (
+                        <div style={{ fontSize: '13px', color: '#64748b', lineHeight: '1.4' }}>
+                            <span style={{ color: '#3B82F6', fontWeight: 'bold' }}>P:</span> <a href={`tel:${data.phone}`} style={{ color: '#333333', textDecoration: 'none' }}>{data.phone}</a>
+                        </div>
+                    )}
+                    {data.email && (
+                        <div style={{ fontSize: '13px', color: '#64748b', lineHeight: '1.4' }}>
+                            <span style={{ color: '#3B82F6', fontWeight: 'bold' }}>E:</span> <a href={`mailto:${data.email}`} style={{ color: '#333333', textDecoration: 'none' }}>{data.email}</a>
+                        </div>
+                    )}
+                    {data.website && (
+                        <div style={{ fontSize: '13px', color: '#64748b', lineHeight: '1.4' }}>
+                            <span style={{ color: '#3B82F6', fontWeight: 'bold' }}>W:</span> <a href={`https://${data.website}`} style={{ color: '#333333', textDecoration: 'none' }}>{data.website}</a>
+                        </div>
+                    )}
+                    {data.address && (
+                        <div style={{ fontSize: '13px', color: '#64748b', lineHeight: '1.4' }}>
+                            <span style={{ color: '#3B82F6', fontWeight: 'bold' }}>A:</span> {data.address}
+                        </div>
+                    )}
+                </div>
+            </div>
+        </div>
     );
 };
 

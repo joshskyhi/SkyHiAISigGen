@@ -1,30 +1,16 @@
-import React, { useState } from 'react';
-import { uploadImage } from '../utils/upload';
+import React from 'react';
 
 const SignatureForm = ({ data, onChange, onImageUpload }) => {
-    const [isUploading, setIsUploading] = useState(false);
-
-    const handleFileChange = async (e) => {
+    const handleFileChange = (e) => {
         const file = e.target.files[0];
         if (file) {
-            // 1. Show local preview immediately
+            // Read file as data URL for local preview only
+            // Upload happens later when "Copy Signature" is clicked
             const reader = new FileReader();
             reader.onloadend = () => {
                 onImageUpload(reader.result);
             };
             reader.readAsDataURL(file);
-
-            // 2. Upload to Cloudinary
-            setIsUploading(true);
-            try {
-                const url = await uploadImage(file);
-                onImageUpload(url); // Update with remote URL
-                console.log('Uploaded to:', url);
-            } catch (error) {
-                alert('Failed to upload image. Using local preview only (will not work for recipients).');
-            } finally {
-                setIsUploading(false);
-            }
         }
     };
 
@@ -130,7 +116,6 @@ const SignatureForm = ({ data, onChange, onImageUpload }) => {
                         <span className="label" style={{ marginBottom: 0 }}>Show Headshot</span>
                     </label>
                 </div>
-                {isUploading && <p style={{ color: '#06b6d4', fontSize: '0.875rem', marginTop: '0.5rem' }}>Uploading to cloud...</p>}
                 {data.headshotUrl && (
                     <div style={{ marginTop: '1rem' }}>
 
